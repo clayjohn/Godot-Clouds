@@ -1,0 +1,397 @@
+[gd_scene load_steps=23 format=2]
+
+[ext_resource path="res://worlnoise.bmp" type="Texture3D" id=1]
+[ext_resource path="res://Camera.gd" type="Script" id=2]
+[ext_resource path="res://ViewportContainer.gd" type="Script" id=3]
+
+[sub_resource type="Shader" id=1]
+code = "shader_type spatial;
+
+uniform sampler2D clouds;
+
+void vertex() {
+	//POSITION = vec4(VERTEX, 1.0);
+}
+
+void fragment() {
+	vec4 col = texture(clouds, UV);
+	ALBEDO = col.xyz;
+	//ALPHA = col.w;
+}"
+
+[sub_resource type="ViewportTexture" id=2]
+viewport_path = NodePath("Viewport")
+
+[sub_resource type="ShaderMaterial" id=3]
+resource_local_to_scene = true
+shader = SubResource( 1 )
+shader_param/clouds = SubResource( 2 )
+
+[sub_resource type="QuadMesh" id=4]
+material = SubResource( 3 )
+size = Vector2( 2, 2 )
+
+[sub_resource type="ProceduralSky" id=5]
+sky_top_color = Color( 0.647059, 0.839216, 0.945098, 1 )
+sky_horizon_color = Color( 0.839216, 0.917647, 0.980392, 1 )
+ground_bottom_color = Color( 0.156863, 0.184314, 0.211765, 1 )
+ground_horizon_color = Color( 0.423529, 0.396078, 0.372549, 1 )
+sun_latitude = 90.0
+sun_energy = 16.0
+texture_size = 0
+
+[sub_resource type="Environment" id=6]
+background_mode = 2
+background_sky = SubResource( 5 )
+ambient_light_color = Color( 0.501961, 0.815686, 1, 1 )
+ssao_quality = 0
+
+[sub_resource type="Shader" id=7]
+code = "shader_type spatial;
+
+uniform sampler2D height;
+/*
+uniform float PI = 3.14159265358979;
+
+
+vec2 hash( in vec2 x ) 
+{
+    vec2 k = vec2( 0.3183099, 0.3678794 );
+    x = x*k + k.yx;
+    return -1.0 + 2.0*fract( 16.0 * k*fract( x.x*x.y*(x.x+x.y)) );
+}
+
+
+// from https://www.shadertoy.com/view/XdXBRH
+//name:Noise - Gradient - 2D - Deriv
+//Author: iq
+// return gradient noise (in x) and its derivatives (in yz)
+vec3 noised( in vec2 p )
+{
+    vec2 i = floor( p );
+    vec2 f = fract( p );
+
+    vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);
+    vec2 du = 30.0*f*f*(f*(f-2.0)+1.0); 
+    
+    vec2 ga = hash( i + vec2(0.0,0.0) );
+    vec2 gb = hash( i + vec2(1.0,0.0) );
+    vec2 gc = hash( i + vec2(0.0,1.0) );
+    vec2 gd = hash( i + vec2(1.0,1.0) );
+    
+    float va = dot( ga, f - vec2(0.0,0.0) );
+    float vb = dot( gb, f - vec2(1.0,0.0) );
+    float vc = dot( gc, f - vec2(0.0,1.0) );
+    float vd = dot( gd, f - vec2(1.0,1.0) );
+
+    return vec3( va + u.x*(vb-va) + u.y*(vc-va) + u.x*u.y*(va-vb-vc+vd),   // value
+                 ga + u.x*(gb-ga) + u.y*(gc-ga) + u.x*u.y*(ga-gb-gc+gd) +  // derivatives
+                 du * (u.yx*(va-vb-vc+vd) + vec2(vb,vc) - va));
+}
+
+
+// code adapted from https://www.shadertoy.com/view/llsGWl
+// name: Gavoronoise
+// author: guil
+//Code has been modified to return analytic derivatives and to favour 
+//direction quite a bit.
+vec3 erosion(in vec2 p, vec2 dir) {    
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    float f = 2.*PI;
+    vec3 va = vec3(0.0);
+   	float wt = 0.0;
+    for (int i=-2; i<=1; i++) {
+		for (int j=-2; j<=1; j++) {		
+        	vec2 o = vec2(float(i), float(j));
+        	vec2 h = hash(ip - o)*0.5;
+            vec2 pp = fp +o - h;
+            float d = dot(pp, pp);
+            float w = exp(-d*2.0);
+            wt +=w;
+            float mag = dot(pp,dir);
+            va += vec3(cos(mag*f), -sin(mag*f)*(pp+dir))*w;
+        }
+    }
+    return va/wt;
+}
+
+
+//This is where the magic happens
+vec3 mountain(vec2 p, float s) {
+    //First generate a base heightmap
+    //it can be based on any type of noise
+    //so long as you also generate normals
+    //Im just doing basic FBM based terrain using
+    //iq's analytic derivative gradient noise
+    vec3 n = vec3(0.0);
+    float nf = 1.0;
+    float na = 0.6;
+    for (int i=0;i<2;i++) {
+       n+= noised(p*s*nf)*na*vec3(1.0, nf, nf);
+       na *= 0.5;
+       nf *= 2.0;
+    }
+    
+    //take the curl of the normal to get the gradient facing down the slope
+    vec2 dir = n.zy*vec2(1.0, -1.0);
+    
+    //Now we compute another fbm type noise
+    // erosion is a type of noise with a strong directionality
+    //we pass in the direction based on the slope of the terrain
+    //erosion also returns the slope. we add that to a running total
+    //so that the direction of successive layers are based on the
+    //past layers
+    vec3 h = vec3(0.0);
+    float a = 0.7*(smoothstep(0.3, 0.5,n.x*0.5+0.5)); //smooth the valleys
+    float f = 1.0;
+    for (int i=0;i<2;i++) {
+        h+= erosion(p*f, dir+h.zy*vec2(1.0, -1.0))*a*vec3(1.0, f, f);
+        a*=0.4;
+        f*=2.0;
+    }
+    //remap height to [0,1] and add erosion
+    //looks best when erosion amount is small
+    //not sure about adding the normals together, but it looks okay
+    return vec3(smoothstep(-1.0, 1.0, n.x)+h.x*0.05, (n.yz+h.yz));
+}*/
+
+void vertex() {
+	vec2 uv = VERTEX.xz;
+	float s = 0.1; 
+	vec3 h = texture(height, UV*0.1).xyz;//mountain(uv*4.0, s);
+	NORMAL = normalize(vec3(h.y*2.0-1.0, 0.6, h.z*2.0-1.0));
+	VERTEX.y += h.x*5.0;
+	COLOR = vec4(0.6, 0.3, 0.2, 1.0);
+}
+
+void fragment() {
+	ALBEDO = COLOR.xyz;
+}"
+
+[sub_resource type="ViewportTexture" id=8]
+flags = 7
+viewport_path = NodePath("Viewport")
+
+[sub_resource type="ShaderMaterial" id=9]
+shader = SubResource( 7 )
+shader_param/height = SubResource( 8 )
+
+[sub_resource type="PlaneMesh" id=10]
+size = Vector2( 10, 10 )
+subdivide_width = 300
+subdivide_depth = 300
+
+[sub_resource type="Shader" id=14]
+code = "shader_type canvas_item;
+
+uniform sampler2D clouds;
+uniform sampler2D pong;
+uniform int check;
+uniform float downscale;
+uniform vec2 resolution = vec2(1024.0, 600.0);
+
+int check_pos(vec2 x, float size) {
+	return int(mod(floor(x.x), size) + mod(floor(x.y), size)*size);
+}
+
+void fragment() {
+	vec2 uv = floor(FRAGCOORD.xy/downscale);
+	uv = uv/(resolution/downscale);
+	
+	if (check_pos(FRAGCOORD.xy, downscale)!=check){
+		
+		discard;//COLOR = texture(pong, UV);
+	} else {
+		COLOR = texture(clouds, uv);
+	}
+}"
+
+[sub_resource type="ViewportTexture" id=16]
+viewport_path = NodePath("ViewportContainer/Viewport/ViewportContainer/Viewport")
+
+[sub_resource type="ViewportTexture" id=17]
+viewport_path = NodePath("ViewportContainer/Viewport2")
+
+[sub_resource type="ShaderMaterial" id=15]
+resource_local_to_scene = true
+shader = SubResource( 14 )
+shader_param/check = null
+shader_param/downscale = 4.0
+shader_param/resolution = Vector2( 1024, 600 )
+shader_param/clouds = SubResource( 16 )
+shader_param/pong = SubResource( 17 )
+
+[sub_resource type="Environment" id=18]
+background_mode = 1
+background_color = Color( 0.690196, 0.8, 0.866667, 1 )
+
+[sub_resource type="World" id=19]
+environment = SubResource( 18 )
+
+[sub_resource type="Shader" id=11]
+code = "shader_type spatial;
+render_mode skip_vertex_transform, unshaded, cull_front;
+
+uniform sampler3D volume;
+
+uniform float g_radius = 200000.0; //ground radius
+uniform float sky_b_radius = 201000.0;//bottom of cloud layer
+uniform float sky_t_radius = 202300.0;//top of cloud layer
+uniform float c_radius = 6008400.0; //2d noise layer
+uniform float cover  : hint_range(0.0, 1.0) = 0.7;
+uniform vec3 sun_position;
+
+
+varying mat4 camera;
+varying vec3 position;
+void vertex() {
+	camera = CAMERA_MATRIX;
+	MODELVIEW_MATRIX[3].xyz = vec3(0.0);
+	VERTEX = (MODELVIEW_MATRIX*vec4(VERTEX, 1.0)).xyz;
+}	
+
+float intersectSphere(vec3 pos, vec3 dir, float r) {
+    float a = dot(dir, dir);
+    float b = 2.0 * dot(dir, pos);
+    float c = dot(pos, pos) - (r * r);
+		float d = sqrt((b*b) - 4.0*a*c);
+		float p = -b - d;
+		float p2 = -b + d;
+    return max(p, p2)/(2.0*a);
+}
+
+vec4 raymarch(vec3 start, vec3 end, float depth) {
+	vec3 dir = (end - start) / depth;
+	vec3 pos = start;
+	float density = 0.0;
+	vec3 col = vec3(0.0);
+	float transmittance = 1.0;
+	for (int i=0;i<int(depth);i++) {
+		pos += dir;
+		float h = smoothstep(cover, 1.0, texture(volume, pos*0.0001).x)*0.5;
+		
+		density = (1.0-density)*h+density;
+		transmittance *= exp(-0.1*h);
+		if (density>0.99) {
+			return vec4(vec3(transmittance), 1.0);
+		}
+	}
+	return vec4(vec3(transmittance), density);
+}
+
+void fragment() {
+	mat4 CAM = camera;
+	vec3 pos = camera[3].xyz;
+	CAM[3].xyz = vec3(0.0);
+	vec3 dir = normalize((CAM*vec4(VERTEX, 1.0)).xyz);
+	vec3 Pos = pos*50.0+vec3(0.0, g_radius, 0.0);
+	vec3 start = Pos+dir*intersectSphere(Pos, dir, sky_b_radius);
+	vec3 end = Pos+dir*intersectSphere(Pos, dir, sky_t_radius);
+
+	vec3 col = mix(vec3(1.0), vec3(0.4, 0.6, 0.95), exp(dir.y*1.0));
+	//vec4 cover = raymarch(dir*0.1+pos*0.01, dir*1.0+pos*0.01, 20.0);
+	vec4 clouds = raymarch(start, end, 20.0);
+	//col = mix(col, cover.xyz, cover.w);
+
+	ALBEDO = clouds.xyz;
+	ALPHA = clouds.w;
+}"
+
+[sub_resource type="ShaderMaterial" id=12]
+shader = SubResource( 11 )
+shader_param/g_radius = 200000.0
+shader_param/sky_b_radius = 201000.0
+shader_param/sky_t_radius = 202300.0
+shader_param/c_radius = 6.0084e+06
+shader_param/cover = 0.708
+shader_param/sun_position = Vector3( 0, 1, 0 )
+shader_param/volume = ExtResource( 1 )
+
+[sub_resource type="SphereMesh" id=13]
+custom_aabb = AABB( -1000, -1000, -1000, 2000, 2000, 2000 )
+radius = 10.0
+height = 5.0
+is_hemisphere = true
+
+[node name="Hemisphere" type="Spatial"]
+
+[node name="Camera" type="Camera" parent="."]
+script = ExtResource( 2 )
+
+[node name="MeshInstance2" type="MeshInstance" parent="Camera"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1 )
+visible = false
+extra_cull_margin = 16384.0
+mesh = SubResource( 4 )
+material/0 = null
+
+[node name="RemoteTransform" type="RemoteTransform" parent="Camera"]
+remote_path = NodePath("../../ViewportContainer/Viewport/ViewportContainer/Viewport/Position3D")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource( 6 )
+
+[node name="MeshInstance3" type="MeshInstance" parent="."]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.847018, 0 )
+material_override = SubResource( 9 )
+mesh = SubResource( 10 )
+material/0 = null
+
+[node name="OmniLight" type="OmniLight" parent="."]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -1.4487, 3.67095, -1.61539 )
+light_energy = 0.5
+shadow_enabled = true
+omni_range = 10.0
+
+[node name="ViewportContainer" type="ViewportContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource( 3 )
+__meta__ = {
+"_edit_use_anchors_": true
+}
+
+[node name="Viewport2" type="Viewport" parent="ViewportContainer"]
+size = Vector2( 1024, 600 )
+own_world = true
+transparent_bg = true
+handle_input_locally = false
+render_target_update_mode = 3
+
+[node name="ViewportContainer" type="ViewportContainer" parent="ViewportContainer/Viewport2"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+stretch = true
+
+[node name="Viewport" type="Viewport" parent="ViewportContainer/Viewport2/ViewportContainer"]
+size = Vector2( 1024, 600 )
+own_world = true
+transparent_bg = true
+handle_input_locally = false
+render_target_update_mode = 3
+
+[node name="ViewportContainer" type="ColorRect" parent="ViewportContainer/Viewport2/ViewportContainer/Viewport"]
+material = SubResource( 15 )
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Viewport" type="Viewport" parent="ViewportContainer/Viewport2/ViewportContainer/Viewport/ViewportContainer"]
+size = Vector2( 256, 150 )
+own_world = true
+world = SubResource( 19 )
+transparent_bg = true
+handle_input_locally = false
+render_target_v_flip = true
+render_target_update_mode = 3
+
+[node name="MeshInstance" type="MeshInstance" parent="ViewportContainer/Viewport2/ViewportContainer/Viewport/ViewportContainer/Viewport"]
+transform = Transform( 1.00402, 0, 0, 0, 1.00402, 0, 0, 0, 1.00402, 0, 0, 0 )
+material_override = SubResource( 12 )
+mesh = SubResource( 13 )
+material/0 = null
+
+[node name="Position3D" type="Position3D" parent="ViewportContainer/Viewport2/ViewportContainer/Viewport/ViewportContainer/Viewport"]
+
+[node name="Camera" type="Camera" parent="ViewportContainer/Viewport2/ViewportContainer/Viewport/ViewportContainer/Viewport/Position3D"]
+current = true

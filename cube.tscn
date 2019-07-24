@@ -1,0 +1,70 @@
+[gd_scene load_steps=5 format=2]
+
+[ext_resource path="res://worlnoise.bmp" type="Texture3D" id=1]
+
+[sub_resource type="CubeMesh" id=1]
+
+custom_aabb = AABB( 0, 0, 0, 0, 0, 0 )
+flip_faces = false
+size = Vector3( 2, 2, 2 )
+subdivide_width = 0
+subdivide_height = 0
+subdivide_depth = 0
+
+[sub_resource type="Shader" id=2]
+
+code = "shader_type spatial;
+render_mode skip_vertex_transform, cull_back;
+
+uniform sampler3D volume;
+
+
+varying vec3 world;
+varying vec3 cam_pos;
+void vertex() {
+	world = (WORLD_MATRIX*vec4(VERTEX, 1.0)).xyz;
+	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	cam_pos = CAMERA_MATRIX[3].xyz;
+}
+
+void fragment() {
+	vec3 eye_vec = normalize(world-cam_pos);
+	vec3 col = vec3(0.0);
+	vec3 p = world;
+	float d = 0.0;
+	for(int i=0;i<100;i++) {
+		float h = smoothstep(0.7, 1.0, texture(volume, p*0.1+0.1).x)*0.5;
+		p += eye_vec*0.1;
+		d = (1.0-d)*h+d;
+		if(d>1.0) {
+			break;
+		}
+
+	}
+	ALBEDO = vec3(1.0);
+	ALPHA = d;
+}"
+
+[sub_resource type="ShaderMaterial" id=3]
+
+render_priority = 0
+shader = SubResource( 2 )
+shader_param/volume = ExtResource( 1 )
+
+[node name="Spatial" type="Spatial"]
+
+[node name="MeshInstance" type="MeshInstance" parent="."]
+transform = Transform( 5, 0, 0, 0, 5, 0, 0, 0, 5, 0, 0, 0 )
+layers = 262145
+material_override = null
+cast_shadow = 1
+extra_cull_margin = 0.0
+use_in_baked_light = false
+lod_min_distance = 0.0
+lod_min_hysteresis = 0.0
+lod_max_distance = 0.0
+lod_max_hysteresis = 0.0
+mesh = SubResource( 1 )
+skeleton = NodePath("..")
+material/0 = SubResource( 3 )
+
